@@ -1,0 +1,40 @@
+name: update-data
+
+on:
+  schedule:
+    - cron: "0 18 * * 0"   # 매주 월요일 새벽 3시(한국 시간)
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "지역코드 점검만 하기 (data.json을 만들지 않아요)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 지역코드 점검
+        if: ${{ inputs.check }}
+        env:
+          MOLIT_KEY: ${{ secrets.MOLIT_KEY }}
+        run: python collect.py --check
+      - name: 실거래가 수집
+        if: ${{ !inputs.check }}
+        env:
+          MOLIT_KEY: ${{ secrets.MOLIT_KEY }}
+        run: python collect.py
+      - name: data.json 저장
+        if: ${{ !inputs.check }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --cached --quiet || (git commit -m "update data.json" && git push)
