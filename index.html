@@ -47,6 +47,8 @@ h1{font-size:26px;line-height:1.2;margin:0 0 4px;font-weight:700;text-wrap:balan
 .coltitle i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--brand);color:var(--brand-ink);font-size:12px}
 .coltitle.r i{background:var(--jump);color:#fff}
 .cond .row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px 14px;align-items:start}
+.guchips{margin-top:8px;max-height:128px;overflow:auto;padding:2px}
+.guchips button{padding:5px 10px;font-size:12px}
 .cond details{margin-top:10px;font-size:13px;color:var(--sub)}
 .cond summary{cursor:pointer;padding:4px 0}
 .cond details .seg{margin-top:6px}
@@ -195,6 +197,7 @@ select:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offs
           <button type="button" data-region="경기" aria-pressed="false">경기</button>
           <button type="button" data-region="인천" aria-pressed="false">인천</button>
         </div>
+        <div class="chips guchips" id="guChips" role="group" aria-label="비교할 구·시 (여러 개 선택 가능)" hidden></div>
         </div></div><details><summary>지도 보기에 쓸 앱</summary>
         <div class="seg" id="provSeg">
           <button type="button" data-prov="naverland" aria-pressed="true">네이버부동산</button>
@@ -282,10 +285,24 @@ function setData(list,real,meta){
   GU={};for(const k in g)GU[k]=[...g[k]].sort((x,y)=>x.localeCompare(y,'ko'));
 }
 
+/* ---------- 단지 이름 바뀐 곳(재건축 등): aliases.json, 없어도 괜찮아요 ---------- */
+function applyAlias(list){
+  for(const c of DATA){c.aka=[];c.now=''}
+  for(const a of (Array.isArray(list)?list:[])){
+    if(!a||!a.old||!a.new)continue;
+    for(const c of DATA){
+      if(a.gu&&c.gu!==a.gu)continue;
+      if(c.name===a.new&&!c.aka.includes(a.old))c.aka.push(a.old);
+      if(c.name===a.old)c.now=a.new;
+    }
+  }
+}
+const nameTag=c=>c.aka&&c.aka.length?'<span class="tag">구 '+esc(c.aka.join(', '))+'</span>':(c.now?'<span class="tag low">현 '+esc(c.now)+'</span>':'');
+
 /* ---------- 상태 ---------- */
 const KEY='jumpup_v2';
 const PROVIDERS={naverland:'네이버부동산',navermap:'네이버지도',kakao:'카카오맵'};
-const state={mine:null,sido:'서울',gu:'노원구',q:'',provider:'naverland',area:'84',extra:10000,region:'all',tab:'jump',sort:'score',better:true,other:true,tol:10,limit:20};
+const state={mine:null,sido:'서울',gu:'노원구',q:'',provider:'naverland',area:'84',extra:10000,region:'all',rgus:[],tab:'jump',sort:'score',better:true,other:true,tol:10,limit:20};
 const mine=()=>state.mine==null?null:(DATA[state.mine]||null);
 const price=c=>state.area==='59'?c.p59:c.p84;
 const cnt=c=>state.area==='59'?c.n59:c.n84;
@@ -303,7 +320,7 @@ function lastText(c){
   return '최근 거래 '+fmt(l[0])+'원 · '+fmtDay(l[1])+(l[2]!=null?' · '+l[2]+'층':'');
 }
 const sortMode=()=>HAS_LIFE?state.sort:'price';
-function save(){try{const m=mine();localStorage.setItem(KEY,JSON.stringify({mineKey:m?m.key:null,sido:state.sido,gu:state.gu,provider:state.provider,area:state.area,extra:state.extra,region:state.region}))}catch(e){}}
+function save(){try{const m=mine();localStorage.setItem(KEY,JSON.stringify({mineKey:m?m.key:null,sido:state.sido,gu:state.gu,provider:state.provider,area:state.area,extra:state.extra,region:state.region,rgus:state.rgus}))}catch(e){}}
 function restore(){
   try{
     const s=JSON.parse(localStorage.getItem(KEY)||'null');if(!s)return;
@@ -312,6 +329,7 @@ function restore(){
     if(s.area==='59'||s.area==='84')state.area=s.area;
     if(Number.isFinite(s.extra)&&s.extra>=0)state.extra=s.extra;
     if(['all','서울','경기','인천'].includes(s.region))state.region=s.region;
+    if(state.region!=='all'&&Array.isArray(s.rgus))state.rgus=s.rgus.filter(g=>(GU[state.region]||[]).includes(g));
     if(PROVIDERS[s.provider])state.provider=s.provider;
   }catch(e){}
 }
@@ -330,7 +348,7 @@ const mapLink=(c,label)=>'<a class="mapbtn" href="'+esc(mapUrl(c))+'" target="_b
 function candidates(){
   const m=mine();if(!m)return [];
   const base=price(m);if(base==null)return [];
-  let list=DATA.filter(c=>c.id!==m.id&&hasP(c)&&(state.region==='all'||c.sido===state.region));
+  let list=DATA.filter(c=>c.id!==m.id&&hasP(c)&&(state.region==='all'||(c.sido===state.region&&(!state.rgus.length||state.rgus.includes(c.gu)))));
   if(state.tab==='jump'){
     const top=base+state.extra;
     list=list.filter(c=>{const p=price(c);return p>base&&p<=top});
@@ -397,6 +415,9 @@ function renderControls(){
   document.querySelectorAll('#areaSeg button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.area===state.area)));
   document.querySelectorAll('#extraChips button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.add===state.extra)));
   document.querySelectorAll('#regionChips button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.region===state.region)));
+  const gc=$('guChips'),gl=state.region==='all'?[]:(GU[state.region]||[]);
+  gc.hidden=!gl.length;
+  gc.innerHTML=gl.length?'<button type="button" data-gu="" aria-pressed="'+(!state.rgus.length)+'">'+state.region+' 전체</button>'+gl.map(g=>'<button type="button" data-gu="'+esc(g)+'" aria-pressed="'+state.rgus.includes(g)+'">'+esc(g)+'</button>').join(''):'';
   $('tJump').setAttribute('aria-selected',String(state.tab==='jump'));
   $('tSim').setAttribute('aria-selected',String(state.tab==='sim'));
 }
@@ -418,12 +439,12 @@ function renderPick(){
   if(!gus.includes(state.gu))state.gu=gus[0]||'';
   sel.value=state.gu;
   const q=state.q.toLowerCase();
-  const all=DATA.filter(c=>c.sido===state.sido&&c.gu===state.gu&&hasP(c)&&(!q||(c.name+' '+(c.dong||'')).toLowerCase().includes(q))).sort((a,b)=>price(b)-price(a));
+  const all=DATA.filter(c=>c.sido===state.sido&&c.gu===state.gu&&hasP(c)&&(!q||(c.name+' '+(c.dong||'')+' '+(c.aka||[]).join(' ')+' '+(c.now||'')).toLowerCase().includes(q))).sort((a,b)=>price(b)-price(a));
   const list=all.slice(0,200);
   $('aptHint').textContent=(state.gu||'지역')+' 단지 '+all.length+'개'+(all.length>200?' · 상위 200개만 보여요, 이름으로 좁혀보세요':'')+' · 이름을 누르면 내 아파트로 정해져요';
   $('aptList').innerHTML=list.length?list.map(c=>
     '<div class="aptrow"'+(c.id===state.mine?' aria-current="true"':'')+'>'+
-    '<button type="button" class="apt-pick" data-id="'+c.id+'"><b>'+esc(c.name)+(c.id===state.mine?'<span class="tag">내 아파트</span>':'')+'</b><span>'+(c.dong?esc(c.dong)+' · ':'')+(c.year?c.year+'년 · ':'')+fmt(price(c))+'원 · 거래 '+cnt(c)+'건</span></button>'+
+    '<button type="button" class="apt-pick" data-id="'+c.id+'"><b>'+esc(c.name)+nameTag(c)+(c.id===state.mine?'<span class="tag">내 아파트</span>':'')+'</b><span>'+(c.dong?esc(c.dong)+' · ':'')+(c.year?c.year+'년 · ':'')+fmt(price(c))+'원 · 거래 '+cnt(c)+'건</span></button>'+
     mapLink(c,'지도 ↗')+'</div>').join(''):'<div class="empty">이 지역에 일치하는 단지가 없어요.</div>';
 }
 function renderList(){
@@ -443,7 +464,7 @@ function renderList(){
     const p=price(c),d=p-base,n=cnt(c);
     const ns=notes(c,m).map(x=>'<span class="note '+(x[0]?'good':'bad')+'">'+(x[0]?'▲ ':'▼ ')+x[1]+'</span>').join('');
     return '<article class="card">'+
-      '<div style="min-width:0"><div class="nm">'+esc(c.name)+(REAL?'':'<span class="tag">샘플</span>')+'</div>'+
+      '<div style="min-width:0"><div class="nm">'+esc(c.name)+nameTag(c)+(REAL?'':'<span class="tag">샘플</span>')+'</div>'+
       '<div class="meta">'+esc(metaLine(c))+' · '+basisText(c)+(n<3?'<span class="tag low">거래 적음</span>':'')+'</div>'+(lastText(c)?'<div class="meta">'+esc(lastText(c))+'</div>':'')+'</div>'+
       '<div class="r"><div class="price">'+fmt(p)+'<small>원</small></div>'+
       '<div class="delta '+(d>0?'up':d<0?'dn':'')+'">'+(d>0?'+':d<0?'−':'±')+fmt(Math.abs(d))+'</div>'+
@@ -467,7 +488,10 @@ $('extra').addEventListener('input',e=>{const v=Math.max(0,Math.round(+e.target.
   document.querySelectorAll('#extraChips button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.add===v)));
   renderList();save()});
 $('extraChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;state.extra=+b.dataset.add;state.limit=20;render()});
-$('regionChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;state.region=b.dataset.region;state.limit=20;render()});
+$('regionChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;state.region=b.dataset.region;state.rgus=[];state.limit=20;render()});
+$('guChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const g=b.dataset.gu;
+  if(!g)state.rgus=[];else state.rgus=state.rgus.includes(g)?state.rgus.filter(x=>x!==g):state.rgus.concat(g);
+  state.limit=20;render()});
 $('tJump').onclick=()=>{state.tab='jump';state.limit=20;render()};
 $('tSim').onclick=()=>{state.tab='sim';state.limit=20;render()};
 $('opts').addEventListener('click',e=>{
@@ -491,6 +515,8 @@ async function init(){
     if(r.ok){const j=await r.json();if(j&&Array.isArray(j.complexes)&&j.complexes.length>0)real=j}
   }catch(e){}
   if(real)setData(real.complexes,true,real);else setData(makeSample(),false,null);
+  let al=[];try{const r=await fetch('aliases.json',{cache:'no-cache'});if(r.ok)al=await r.json()}catch(e){}
+  applyAlias(al);
   state.sido=GU['서울']?'서울':(Object.keys(GU)[0]||'서울');
   const gus=GU[state.sido]||[''];
   state.gu=gus.includes('노원구')?'노원구':gus[0];
