@@ -287,13 +287,17 @@ function setData(list,real,meta){
 
 /* ---------- 단지 이름 바뀐 곳(재건축 등): aliases.json, 없어도 괜찮아요 ---------- */
 function applyAlias(list){
-  for(const c of DATA){c.aka=[];c.now=''}
+  for(const c of DATA){c.aka=Array.isArray(c.aka)?c.aka.slice():[];c.now=''}
+  const has=(c,n)=>DATA.some(x=>x!==c&&x.sido===c.sido&&x.gu===c.gu&&(x.dong||'')===(c.dong||'')&&x.name===n);
   for(const a of (Array.isArray(list)?list:[])){
     if(!a||!a.old||!a.new)continue;
     for(const c of DATA){
       if(a.gu&&c.gu!==a.gu)continue;
       if(c.name===a.new&&!c.aka.includes(a.old))c.aka.push(a.old);
-      if(c.name===a.old)c.now=a.new;
+      else if(c.name===a.old){
+        if(has(c,a.new))c.now=a.new;                       // 같은 동에 현재 이름 단지가 따로 있으면 이름만 안내
+        else{c.name=a.new;if(!c.aka.includes(a.old))c.aka.push(a.old)}  // 현재 이름으로 바꿔서 보여줘요
+      }
     }
   }
 }
@@ -334,15 +338,38 @@ function restore(){
   }catch(e){}
 }
 
-/* 지도 링크: 새 탭으로 열려서 지도를 닫으면 점파트 화면이 그대로 남는다 */
+/* 지도 링크: 새 탭으로 열려서 지도를 닫으면 점파트 화면이 그대로 남는다.
+   모바일은 웹 주소만으로는 단지가 안 잡혀서, 네이버지도는 앱 열기(없으면 웹), 네이버부동산은 모바일 주소를 써요. */
+const UA=(typeof navigator!=='undefined'&&navigator.userAgent)||'';
+const IS_ANDROID=/Android/i.test(UA),IS_IOS=/iPhone|iPad|iPod/i.test(UA)||(/Macintosh/i.test(UA)&&typeof navigator!=='undefined'&&navigator.maxTouchPoints>1);
+const IS_MOBILE=IS_ANDROID||IS_IOS;
+const cleanName=n=>String(n||'').replace(/\([^)]*\)/g,'').replace(/\s+/g,' ').trim();
+function mapQuery(c){
+  if(!REAL)return c.sido+' '+c.gu;
+  return [c.dong,cleanName(c.name)].filter(Boolean).join(' ');   // 동 + 단지명: 너무 길면 검색이 빗나가요
+}
 function mapUrl(c){
-  const q=REAL?[c.sido,c.gu,c.dong,c.name].filter(Boolean).join(' '):c.sido+' '+c.gu;
-  const e=encodeURIComponent(q);
-  if(state.provider==='navermap')return 'https://map.naver.com/p/search/'+e;
+  const e=encodeURIComponent(mapQuery(c));
+  if(state.provider==='navermap'){
+    const web='https://map.naver.com/p/search/'+e;
+    if(IS_ANDROID)return 'intent://search?query='+e+'&appname='+encodeURIComponent(location.hostname||'jumpup')+'#Intent;scheme=nmap;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;package=com.nhn.android.nmap;S.browser_fallback_url='+encodeURIComponent(web)+';end';
+    return web;
+  }
   if(state.provider==='kakao')return 'https://map.kakao.com/link/search/'+e;
+  if(IS_MOBILE)return 'https://m.land.naver.com/search/result/'+e;
   return 'https://new.land.naver.com/search?sk='+e;
 }
-const mapLink=(c,label)=>'<a class="mapbtn" href="'+esc(mapUrl(c))+'" target="_blank" rel="noopener" aria-label="'+esc(c.name)+' 지도 보기, 새 탭에서 열려요">'+(label||'지도 보기 ↗')+'</a>';
+const mapLink=(c,label)=>'<a class="mapbtn" href="'+esc(mapUrl(c))+'" data-q="'+esc(mapQuery(c))+'" target="_blank" rel="noopener" aria-label="'+esc(c.name)+' 지도 보기, 새 탭에서 열려요">'+(label||'지도 보기 ↗')+'</a>';
+// iPhone은 네이버지도 앱 스킴을 먼저 시도하고, 앱이 없으면 웹으로 넘어가요
+document.addEventListener('click',e=>{
+  const a=e.target.closest&&e.target.closest('a.mapbtn');
+  if(!a||!IS_IOS||state.provider!=='navermap'||!a.dataset.q)return;
+  e.preventDefault();
+  const q=encodeURIComponent(a.dataset.q),web='https://map.naver.com/p/search/'+q;
+  const t=Date.now();
+  location.href='nmap://search?query='+q+'&appname='+encodeURIComponent(location.hostname||'jumpup');
+  setTimeout(()=>{if(!document.hidden&&Date.now()-t<3000)window.open(web,'_blank','noopener')},1500);
+});
 
 /* ---------- 계산 ---------- */
 function candidates(){
